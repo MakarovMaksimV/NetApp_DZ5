@@ -29,6 +29,12 @@ namespace Seminar5
             return JsonSerializer.Deserialize<MessagesUDP>(json);
         }
 
+        public override string ToString()
+        {
+            return $"От кого: {FromName}\n" +
+                    $"Кому: {ToName}\n" +
+                    $"Сообщение: {Text}";
+        }
 
 
 

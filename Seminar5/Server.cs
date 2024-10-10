@@ -4,6 +4,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using Seminar5;
+using Seminar5.Abstraction;
 using Seminar5.Models;
 
 namespace Seminar5
@@ -12,14 +13,18 @@ namespace Seminar5
     {
         // Словарь для хранения адресов клиентов по их именам
         Dictionary<String, IPEndPoint> clients = new Dictionary<string, IPEndPoint>(); // Объект для работы с UDP-сокетом
-        UdpClient udpClient;
-        // Метод для обработки регистрации нового клиента
+        IMessageSource messageSource;
+
+        public Server (IMessageSource source)
+        {
+            messageSource = source; 
+        }
+
+        
         void Register(MessagesUDP message, IPEndPoint fromep)
         {
             Console.WriteLine("Message Register, name = " + message.FromName);
-            // Добавляем клиента в словарь
             clients.Add(message.FromName, fromep);
-            // Добавляем пользователя в базу данных, если его еще нет
             using (var ctx = new Context())
             {
                 if (ctx.Users.FirstOrDefault(x => x.Name == message.FromName) != null) return;
@@ -27,11 +32,9 @@ namespace Seminar5
                 ctx.SaveChanges();
             }
         }
-        // Метод для подтверждения получения сообщения
         void ConfirmMessageReceived(int? id)
         {
             Console.WriteLine("Message confirmation id=" + id);
-            // Изменяем статус получения сообщения в базе данных
             using (var ctx = new Context())
             {
                 var msg = ctx.Massages.FirstOrDefault(x => x.Id == id);
@@ -42,13 +45,12 @@ namespace Seminar5
                 }
             }
         }
-        // Метод для пересылки сообщения
+
         void RelyMessage(MessagesUDP message)
         {
             int? id = null;
             if (clients.TryGetValue(message.ToName, out IPEndPoint ep))
             {
-                // Добавляем сообщение в базу данных
                 using (var ctx = new Context())
                 {
                     var fromUser = ctx.Users.First(x => x.Name == message.FromName);
@@ -63,11 +65,9 @@ namespace Seminar5
                     ctx.SaveChanges();
                     id = msg.Id;
                 }
-                // Подготавливаем сообщение для пересылки
-                var forwardMessageJson = new MessagesUDP() { Id = id, Command = Command.Message, ToName = message.ToName, FromName = message.FromName, Text = message.Text }.ToJson();
-                byte[] forwardBytes = Encoding.ASCII.GetBytes(forwardMessageJson);
-                // Отправляем сообщение клиенту
-                udpClient.Send(forwardBytes, forwardBytes.Length, ep);
+                var forwardMessage = new MessagesUDP() { Id = id, Command = Command.Message,
+                    ToName = message.ToName, FromName = message.FromName, Text = message.Text };
+                messageSource.Send(forwardMessage, ep);
                 Console.WriteLine($"Message Relied, from = {message.FromName} to = {message.ToName}");
             }
             else
@@ -75,13 +75,12 @@ namespace Seminar5
                 Console.WriteLine("Пользователь не найден.");
             }
         }
-        // Метод для обработки полученного сообщения
+
         void ProcessMessage(MessagesUDP message, IPEndPoint fromep)
         {
             Console.WriteLine($"Получено сообщение от {message.FromName} для {message.ToName} с командой " +
                 $"{message.Command}:");
         Console.WriteLine(message.Text);
-            // Обработка в зависимости от команды сообщения
             if (message.Command == Command.Register)
             {
                 Register(message, new IPEndPoint(fromep.Address, fromep.Port));
@@ -97,24 +96,16 @@ namespace Seminar5
             }
         }
 
-        // Метод для запуска работы сервера
         public void Work()
         {
-            // Инициализация объекта для приема данных по UDP
-            IPEndPoint remoteEndPoint;
-            udpClient = new UdpClient(12345);
-            remoteEndPoint = new IPEndPoint(IPAddress.Any, 0);
             Console.WriteLine("UDP Клиент ожидает сообщений...");
-            // Бесконечный цикл приема сообщений
+
             while (true)
             {
-                byte[] receiveBytes = udpClient.Receive(ref remoteEndPoint); string receivedData = Encoding.ASCII.GetString(receiveBytes);
-                Console.WriteLine(receivedData);
                 try
                 {
-                    // Десериализация полученного сообщения
-                    var message = MessagesUDP.FromJson(receivedData);
-                    // Обработка сообщения
+                    IPEndPoint remoteEndPoint = new IPEndPoint(IPAddress.Any, 0);
+                    var message = messageSource.Resive(ref remoteEndPoint);
                     ProcessMessage(message, remoteEndPoint);
                 }
                 catch (Exception ex)
